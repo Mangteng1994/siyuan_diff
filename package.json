@@ -1,0 +1,27 @@
+{
+  "name": "siyuan_diff",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "check": "npm test && npm run typecheck && npm run build && npm run verify:package",
+    "verify:package": "node scripts/verify-package.mjs",
+    "preview": "npm run build && node scripts/preview.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "jsdom": "^26.1.0",
+    "esbuild": "^0.25.10",
+    "siyuan": "^1.1.5",
+    "fflate": "^0.8.2",
+    "@types/node": "^24.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mangteng1994/siyuan_diff.git"
+  }
+}

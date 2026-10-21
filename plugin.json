@@ -1,0 +1,34 @@
+{
+  "name": "siyuan_diff",
+  "author": "Mangteng1994",
+  "url": "https://github.com/Mangteng1994/siyuan_diff",
+  "version": "0.1.0",
+  "minAppVersion": "3.0.12",
+  "backends": [
+    "all"
+  ],
+  "frontends": [
+    "desktop",
+    "desktop-window",
+    "browser-desktop"
+  ],
+  "disabledInPublish": true,
+  "displayName": {
+    "default": "文档Diff",
+    "zh-CN": "文档Diff"
+  },
+  "description": {
+    "default": "对比思源文档或复制文段，逐字审阅新增和删除。",
+    "zh-CN": "对比思源文档或复制文段，逐字审阅新增和删除。"
+  },
+  "readme": {
+    "default": "README.md",
+    "zh-CN": "README.md"
+  },
+  "keywords": [
+    "diff",
+    "对比",
+    "文档",
+    "修订"
+  ]
+}

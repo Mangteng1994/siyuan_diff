@@ -1,0 +1,16 @@
+import { build } from 'esbuild';
+import { mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
+import { zipSync } from 'fflate';
+const manifest=JSON.parse((await readFile('plugin.json','utf8')).replace(/^\uFEFF/,''));
+const output=`dist/${manifest.name}`;
+await mkdir(`${output}/i18n`,{recursive:true});
+await mkdir(`${output}/docs`,{recursive:true});
+await build({entryPoints:['src/index.ts'],bundle:true,external:['siyuan'],format:'cjs',platform:'browser',target:'es2022',outfile:`${output}/index.js`,minify:true});
+const files=['index.js','index.css','plugin.json','README.md','CHANGELOG.md','docs/tdd.md','i18n/zh_CN.json','i18n/en_US.json'];
+for(const name of files.filter(n=>!n.startsWith('index.'))) await copyFile(name,`${output}/${name}`);
+const entries={};for(const name of files)entries[name]=new Uint8Array(await readFile(`${output}/${name}`));
+const archive=`dist/${manifest.name}-${manifest.version}.zip`;
+const zip=zipSync(entries,{level:9});
+await writeFile(archive,zip);
+await writeFile('dist/package.zip',zip);
+console.log(`已构建 ${output}、${archive} 和 dist/package.zip`);

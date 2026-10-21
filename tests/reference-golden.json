@@ -1,0 +1,5 @@
+{
+  "description": "参考 diff.ts，二字符字母表、长度 0 至 4，共 1922 组结果的 SHA-256",
+  "sourceSha256": "66cc0e14961534276f3d81560f550782ce449ae876bed5f8aaa9d3efbbebfc8e",
+  "resultSha256": "2221d77d51b02db07890d16d6aefd62d2c55bf46e60886cba5fd55bbf475ea9d"
+}
