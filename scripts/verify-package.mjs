@@ -10,7 +10,7 @@ const archive=unzipSync(new Uint8Array(versioned));
 const packagedManifest=JSON.parse(new TextDecoder().decode(archive['plugin.json']));
 assert.deepEqual(packagedManifest,manifest,'ZIP 内清单必须与仓库清单一致');
 assert.equal(manifest.name,new URL(manifest.url).pathname.split('/').at(-1),'集市包名必须与仓库名一致');
-for(const name of ['index.js','index.css','plugin.json','README.md','i18n/zh_CN.json','i18n/en_US.json'])assert.ok(archive[name],`安装包缺少 ${name}`);
+for(const name of ['index.js','index.css','plugin.json','README.md','LICENSE','i18n/zh_CN.json','i18n/en_US.json'])assert.ok(archive[name],`安装包缺少 ${name}`);
 const dom=new JSDOM('<main></main>');
 let tabOptions,topOptions,command,opened;
 const events=new Map();

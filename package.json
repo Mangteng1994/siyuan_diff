@@ -1,6 +1,6 @@
 {
   "name": "siyuan_diff",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,5 +23,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/Mangteng1994/siyuan_diff.git"
-  }
+  },
+  "license": "MIT"
 }

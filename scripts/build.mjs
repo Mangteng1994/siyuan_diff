@@ -6,7 +6,7 @@ const output=`dist/${manifest.name}`;
 await mkdir(`${output}/i18n`,{recursive:true});
 await mkdir(`${output}/docs`,{recursive:true});
 await build({entryPoints:['src/index.ts'],bundle:true,external:['siyuan'],format:'cjs',platform:'browser',target:'es2022',outfile:`${output}/index.js`,minify:true});
-const files=['index.js','index.css','plugin.json','README.md','CHANGELOG.md','docs/tdd.md','i18n/zh_CN.json','i18n/en_US.json'];
+const files=['index.js','index.css','plugin.json','README.md','LICENSE','CHANGELOG.md','docs/tdd.md','i18n/zh_CN.json','i18n/en_US.json'];
 for(const name of files.filter(n=>!n.startsWith('index.'))) await copyFile(name,`${output}/${name}`);
 const entries={};for(const name of files)entries[name]=new Uint8Array(await readFile(`${output}/${name}`));
 const archive=`dist/${manifest.name}-${manifest.version}.zip`;
