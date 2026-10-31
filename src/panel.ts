@@ -1,4 +1,5 @@
-import { compare, type Comparison, type Segment } from './diff';
+import type { Comparison, Segment } from './diff';
+import { startCompare, type CompareTask } from './diff-runner';
 import { SiyuanClient } from './siyuan-client';
 
 type Side = 'left' | 'right';
@@ -7,6 +8,7 @@ export class DiffPanel {
   private mode: 'document' | 'text' = 'document';
   private view: 'split' | 'unified' = 'split';
   private result?: Comparison;
+  private task?: CompareTask;
   private generation = 0;
   private disposed = false;
   private activeChange = -1;
@@ -58,7 +60,7 @@ export class DiffPanel {
     label.textContent=title?`已选择：${title}`:'';label.hidden=!title;
   }
   private invalidate() {
-    this.generation++;this.result=undefined;this.activeChange=-1;
+    this.generation++;this.task?.cancel();this.result=undefined;this.activeChange=-1;
     this.el<HTMLButtonElement>('[data-action=compare]').disabled=false;
     this.el('[data-result]').replaceChildren(Object.assign(document.createElement('div'),{className:'dd-empty',textContent:'内容已就绪，点击「开始对比」。'}));
     this.status('等待对比。');
@@ -138,6 +140,7 @@ export class DiffPanel {
   }
   private async run() {
     const stamp=++this.generation;
+    this.task?.cancel();
     this.result=undefined;this.el('[data-result]').replaceChildren();
     this.el<HTMLButtonElement>('[data-action=compare]').disabled=true;this.status('正在读取并对比…');
     try {
@@ -148,7 +151,10 @@ export class DiffPanel {
         [a,b]=docs.map(d=>d.markdown);titles=docs.map(d=>d.title);
       }
       if(this.disposed || stamp!==this.generation)return;
-      this.result=compare(a,b);this.activeChange=-1;
+      this.task=startCompare(a,b);
+      const result=await this.task.result;
+      if(this.disposed || stamp!==this.generation)return;
+      this.result=result;this.activeChange=-1;
       const coarse=this.result.coarse?`　其中 ${this.result.coarse} 个区块改动过大，已按整块标记`:'';
       this.status(this.result.changed?`${titles[0]} → ${titles[1]}　新增 ${this.result.added} 字符 · 删除 ${this.result.removed} 字符${coarse}`:'两个版本完全一致（已统一 CRLF / LF 换行）。');
       this.render(this.el('[data-action=view-lines]').getAttribute('aria-pressed')==='true');
@@ -200,5 +206,5 @@ export class DiffPanel {
     selected?.scrollIntoView?.({block:'nearest',behavior:'auto'});
     this.status(`第 ${this.activeChange+1} / ${ids.length} 处差异`);
   }
-  destroy() {this.disposed=true;this.generation++;this.abort.abort();}
+  destroy() {this.disposed=true;this.generation++;this.task?.cancel();this.abort.abort();}
 }
