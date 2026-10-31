@@ -63,6 +63,12 @@ export class DiffPanel {
     this.el('[data-result]').replaceChildren(Object.assign(document.createElement('div'),{className:'dd-empty',textContent:'内容已就绪，点击「开始对比」。'}));
     this.status('等待对比。');
   }
+  compareDocuments(left:{id:string;title:string},right:{id:string;title:string}) {
+    void this.action('mode-document');
+    this.id('left').value=left.id;this.select('left',left.title);
+    this.id('right').value=right.id;this.select('right',right.title);
+    this.invalidate();void this.action('compare');
+  }
   private async action(action:string) {
     try {
       if(action.startsWith('mode-')) {

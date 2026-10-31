@@ -24,7 +24,10 @@ const context={module,exports:module.exports,document:dom.window.document,naviga
   require(name){assert.equal(name,'siyuan');return {Plugin,openTab:async options=>{opened=options;},getActiveEditor:()=>({protyle:{block:{rootID:'20261020123456-abcdefg'}}}),showMessage:message=>{throw new Error(message);}};}};
 vm.runInNewContext(new TextDecoder().decode(archive['index.js']),context);
 assert.equal(typeof module.exports.default,'function','CommonJS 默认导出必须是插件类');
-const plugin=new module.exports.default();plugin.onload();assert.equal(events.size,2);assert.ok(command.callback);
+const plugin=new module.exports.default();plugin.onload();assert.equal(events.size,3);assert.ok(command.callback);
+const menuItems=[];events.get('open-menu-doctree')({detail:{type:'doc',elements:[dom.window.document.createElement('li')],menu:{addItem:item=>menuItems.push(item)}}});assert.equal(menuItems.length,0,'没有文档 ID 的元素不显示菜单');
+const docItem=dom.window.document.createElement('li');docItem.dataset.nodeId='20261020123456-abcdefg';
+events.get('open-menu-doctree')({detail:{type:'doc',elements:[docItem],menu:{addItem:item=>menuItems.push(item)}}});assert.equal(menuItems[0].label,'设为对比原文');
 topOptions.callback();assert.equal(opened.custom.id,manifest.name+'document-diff');
 const element=dom.window.document.querySelector('main');tabOptions.init.call({element});
 element.querySelector('[data-action=current-left]').click();assert.equal(element.querySelector('[data-doc-id=left]').value,'20261020123456-abcdefg');

@@ -75,6 +75,15 @@ describe('两个功能块和差异审阅',()=>{
     click(root,'search-left');await tick();root.querySelector<HTMLButtonElement>('[data-choices=left] button')!.click();
     click(root,'clear');expect(shown('left').hidden).toBe(true);
   });
+  it('从右键菜单发起时切回文档模式、填入来源并开始对比',async()=>{
+    const {root,client,panel}=setup();click(root,'mode-text');
+    vi.spyOn(client,'readDocument').mockImplementation(async id=>({id,title:id,markdown:id==='20261020123456-abcdefg'?'旧':'新'}));
+    panel.compareDocuments({id:'20261020123456-abcdefg',title:'甲'},{id:'20261020123456-abcdefh',title:'乙'});await tick();
+    expect(root.querySelector<HTMLElement>('[data-document-source]')!.hidden).toBe(false);
+    expect(root.querySelector('[data-action=mode-document]')!.getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-selected=right]')!.textContent).toContain('乙');
+    expect(root.querySelector('del')!.textContent).toBe('旧');
+  });
   it('双栏按行成对渲染，新增行左侧留空保持对齐',async()=>{
     const {root}=setup();click(root,'mode-text');const fields=root.querySelectorAll('textarea');
     fields[0].value='甲\n乙';fields[1].value='甲\n新增\n乙';click(root,'compare');await tick();
