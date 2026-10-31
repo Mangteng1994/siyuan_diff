@@ -42,6 +42,28 @@ describe('两个功能块和差异审阅',()=>{
     click(root,'compare');await tick();fields[0].value='乙';fields[0].dispatchEvent(new Event('input',{bubbles:true}));
     expect(root.querySelector('[data-result]')!.textContent).toContain('开始对比');
   });
+  it('结果失效后空状态占满结果区，不残留双栏布局',async()=>{
+    const {root}=setup();click(root,'mode-text');const fields=root.querySelectorAll('textarea');fields[0].value='甲';
+    click(root,'compare');await tick();expect(root.querySelector('.dd-split')).not.toBeNull();
+    fields[0].dispatchEvent(new Event('input',{bubbles:true}));
+    expect(root.querySelector('.dd-split')).toBeNull();expect(root.querySelector('[data-result]>.dd-empty')).not.toBeNull();
+  });
+  it('在标题搜索框输入不会清空已有结果',async()=>{
+    const {root}=setup();click(root,'mode-text');root.querySelectorAll('textarea')[0].value='甲';click(root,'compare');await tick();
+    root.querySelector('[data-search=left]')!.dispatchEvent(new Event('input',{bubbles:true}));
+    expect(root.querySelector('[data-result] ins, [data-result] del')).not.toBeNull();
+  });
+  it('双栏按行成对渲染，新增行左侧留空保持对齐',async()=>{
+    const {root}=setup();click(root,'mode-text');const fields=root.querySelectorAll('textarea');
+    fields[0].value='甲\n乙';fields[1].value='甲\n新增\n乙';click(root,'compare');await tick();
+    const cells=[...root.querySelectorAll('.dd-cell')].map(c=>c.textContent);
+    expect(cells).toEqual(['甲','甲','','新增','乙','乙']);
+  });
+  it('部分区块过大时在状态栏说明按整块标记',async()=>{
+    const {root}=setup();click(root,'mode-text');const fields=root.querySelectorAll('textarea');
+    fields[0].value='甲'.repeat(4000);fields[1].value='乙'.repeat(4000);click(root,'compare');await tick();
+    expect(root.querySelector('[role=status]')!.textContent).toContain('整块');
+  });
   it('销毁面板时异步读取结果不能继续修改界面',async()=>{
     const {root,client,panel}=setup();let resolve!:(v:{id:string,title:string,markdown:string})=>void;
     vi.spyOn(client,'readDocument').mockReturnValue(new Promise(r=>resolve=r));

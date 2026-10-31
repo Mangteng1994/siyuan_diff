@@ -1,16 +1,22 @@
 export type DiffOp = 'equal' | 'add' | 'remove';
 export interface Segment { op: DiffOp; text: string }
-export interface Comparison { segments: Segment[]; lines: Segment[]; added: number; removed: number; changed: boolean }
+/** rows 是双栏的对齐行：相同行各占一行，连续改动聚合为一行；coarse 为超出字符预算、按整块标记的区块数。 */
+export interface Comparison { segments: Segment[]; lines: Segment[]; rows: Segment[][]; added: number; removed: number; changed: boolean; coarse: number }
 const LIMIT = 50000;
 const BUDGET = 1_000_000;
+const BLANK = '↵';
+const toLines = (text: string) => text ? text.split(/\r?\n/) : [];
+const equalLines = (lines: string[]) => lines.map((text): Segment => ({op:'equal',text}));
 
 /** 沿用参考项目的行级 LCS 与回溯平局顺序。 */
 export function buildUnifiedDiff(original: string, updated: string): Segment[] {
-  const a = original ? original.split(/\r?\n/) : [];
-  const b = updated ? updated.split(/\r?\n/) : [];
-  if (original === updated) return a.map(text=>({op:'equal',text}));
+  const a = toLines(original), b = toLines(updated);
+  if (original === updated) return equalLines(a);
   // 行级从尾部回溯；裁剪共同前缀会改变重复行的匹配位置。
-  const aa = a, bb = b;
+  return diffLines(a, b);
+}
+
+function diffLines(aa: string[], bb: string[]): Segment[] {
   if ((aa.length+1)*(bb.length+1)>4_000_000) throw new Error('行级差异过大，请分段对比。');
   const dp = Array.from({length:aa.length+1},()=>new Uint32Array(bb.length+1));
   for(let i=1;i<=aa.length;i++) for(let j=1;j<=bb.length;j++)
@@ -72,10 +78,49 @@ export function buildUnifiedCharDiff(original: string, updated: string): Segment
   push({op:'equal',text:a.slice(a.length-tail).join('')});
   return merged;
 }
+/** 裁剪共同首尾行后再做 LCS，使改动集中的长文不受行级表上限影响。 */
+function alignLines(original:string,updated:string):Segment[] {
+  const a=toLines(original),b=toLines(updated);
+  let head=0,tail=0;
+  while(head<a.length && head<b.length && a[head]===b[head]) head++;
+  while(tail<a.length-head && tail<b.length-head && a[a.length-1-tail]===b[b.length-1-tail]) tail++;
+  return [...equalLines(a.slice(0,head)),...diffLines(a.slice(head,a.length-tail),b.slice(head,b.length-tail)),...equalLines(a.slice(a.length-tail))];
+}
+
+/** 先按行对齐，再只对改动块做字符级对比；单块超预算时整块标记，结果仍可无损还原。 */
 export function compare(original:string,updated:string):Comparison {
   const a=original.replace(/\r\n/g,'\n'),b=updated.replace(/\r\n/g,'\n');
-  const segments=buildUnifiedCharDiff(a,b);
+  if(a.length>LIMIT || b.length>LIMIT) throw new Error(`每侧最多 ${LIMIT} 个 UTF-16 单元，请分段对比。`);
+  const lines=alignLines(a,b);
+  const segments:Segment[]=[],rows:Segment[][]=[];
+  let coarse=0,hasLeft=false,hasRight=false,removedLines:string[]=[],addedLines:string[]=[];
+  const push=(s:Segment)=>{ if(!s.text)return; const last=segments.at(-1); if(last?.op===s.op)last.text+=s.text; else segments.push({...s}); };
+  // 行之间的换行只属于两侧都已有内容的一侧。
+  const separate=(left:boolean,right:boolean)=>{
+    const l=left&&hasLeft,r=right&&hasRight;
+    if(l||r)push({op:l&&r?'equal':l?'remove':'add',text:'\n'});
+    hasLeft||=left;hasRight||=right;
+  };
+  const flush=()=>{
+    if(!removedLines.length && !addedLines.length)return;
+    separate(removedLines.length>0,addedLines.length>0);
+    const left=removedLines.join('\n'),right=addedLines.join('\n');
+    let inner:Segment[];
+    try{inner=buildUnifiedCharDiff(left,right);}
+    catch{coarse++;inner=[{op:'remove',text:left},{op:'add',text:right}];}
+    inner.forEach(push);
+    const row=inner.filter(s=>s.text);
+    if(removedLines.length && !left)row.push({op:'remove',text:BLANK});
+    if(addedLines.length && !right)row.push({op:'add',text:BLANK});
+    rows.push(row);removedLines=[];addedLines=[];
+  };
+  for(const line of lines) {
+    if(line.op==='remove')removedLines.push(line.text);
+    else if(line.op==='add')addedLines.push(line.text);
+    else {flush();separate(true,true);push(line);rows.push([line]);}
+  }
+  flush();
   const count=(op:DiffOp)=>segments.filter(s=>s.op===op).reduce((n,s)=>n+[...s.text].length,0);
   const added=count('add'),removed=count('remove');
-  return {segments,lines:buildUnifiedDiff(a,b),added,removed,changed:added+removed>0};
+  return {segments,lines,rows,added,removed,changed:added+removed>0,coarse};
 }

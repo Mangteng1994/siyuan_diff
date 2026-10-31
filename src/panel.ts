@@ -35,7 +35,7 @@ export class DiffPanel {
       const button=(e.target as HTMLElement).closest<HTMLButtonElement>('button[data-action]');
       if(button && !button.disabled) void this.action(button.dataset.action!);
     },opts);
-    root.addEventListener('input',()=>this.invalidate(),opts);
+    root.addEventListener('input',e=>{if(!(e.target as HTMLElement).matches('[data-search]'))this.invalidate();},opts);
     root.addEventListener('keydown',e=>{
       if((e.ctrlKey || e.metaKey) && e.key==='Enter') {e.preventDefault();void this.action('compare');}
     },opts);
@@ -127,7 +127,8 @@ export class DiffPanel {
       }
       if(this.disposed || stamp!==this.generation)return;
       this.result=compare(a,b);this.activeChange=-1;
-      this.status(this.result.changed?`${titles[0]} → ${titles[1]}　新增 ${this.result.added} 字符 · 删除 ${this.result.removed} 字符`:'两个版本完全一致（已统一 CRLF / LF 换行）。');
+      const coarse=this.result.coarse?`　其中 ${this.result.coarse} 个区块改动过大，已按整块标记`:'';
+      this.status(this.result.changed?`${titles[0]} → ${titles[1]}　新增 ${this.result.added} 字符 · 删除 ${this.result.removed} 字符${coarse}`:'两个版本完全一致（已统一 CRLF / LF 换行）。');
       this.render(this.el('[data-action=view-lines]').getAttribute('aria-pressed')==='true');
     } catch(error) {
       if(!this.disposed && stamp===this.generation)this.status(error instanceof Error?error.message:String(error));
@@ -136,7 +137,6 @@ export class DiffPanel {
   private render(lines=false) {
     if(!this.result)return;
     const container=this.el('[data-result]');container.replaceChildren();
-    container.classList.toggle('dd-split',!lines && this.view==='split');
     const append=(target:HTMLElement,segment:Segment,index:number)=>{
       const node=document.createElement(segment.op==='add'?'ins':segment.op==='remove'?'del':'span');
       node.textContent=segment.text;
@@ -156,10 +156,15 @@ export class DiffPanel {
       const pre=document.createElement('div');pre.className='dd-content';
       this.result.segments.forEach((s,i)=>append(pre,s,i));container.append(pre);
     } else {
-      const left=document.createElement('div'),right=document.createElement('div');
-      left.className=right.className='dd-content';left.setAttribute('aria-label','原文差异');right.setAttribute('aria-label','修改后差异');
-      this.result.segments.forEach((s,i)=>{if(s.op!=='add')append(left,s,i);if(s.op!=='remove')append(right,s,i);});
-      container.append(left,right);
+      const grid=document.createElement('div');grid.className='dd-split';grid.setAttribute('aria-label','双栏差异');
+      let index=0;
+      for(const row of this.result.rows) {
+        const left=document.createElement('div'),right=document.createElement('div');
+        left.className=right.className='dd-cell';
+        for(const s of row) {if(s.op!=='add')append(left,s,index);if(s.op!=='remove')append(right,s,index);index++;}
+        grid.append(left,right);
+      }
+      container.append(grid);
     }
     this.activeChange=-1;
   }
