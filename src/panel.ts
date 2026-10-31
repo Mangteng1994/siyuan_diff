@@ -1,12 +1,15 @@
 import type { Comparison, Segment } from './diff';
 import { startCompare, type CompareTask } from './diff-runner';
+import { foldRows } from './fold';
 import { SiyuanClient } from './siyuan-client';
 
 type Side = 'left' | 'right';
+const isChangedRow=(row:Segment[])=>row.some(s=>s.op!=='equal');
 /** 面板状态仅驻留内存，不保存笔记或剪贴板内容。 */
 export class DiffPanel {
   private mode: 'document' | 'text' = 'document';
   private view: 'split' | 'unified' = 'split';
+  private folded = true;
   private result?: Comparison;
   private task?: CompareTask;
   private generation = 0;
@@ -31,7 +34,7 @@ export class DiffPanel {
       </section>
       <div class="dd-actions"><button class="dd-primary" data-action="compare">开始对比</button><button data-action="swap">交换左右</button><button data-action="clear">清空</button><span class="dd-hint">Ctrl / ⌘ + Enter 开始对比</span></div>
       <div class="dd-status" role="status" aria-live="polite">选择两篇文档，或切换到复制文段对比。</div>
-      <section class="dd-review" aria-label="差异结果"><div class="dd-review-tools"><div class="dd-view"><button data-action="view-split" aria-pressed="true">双栏</button><button data-action="view-unified" aria-pressed="false">合并</button><button data-action="view-lines" aria-pressed="false">逐行</button></div><div><button data-action="previous" aria-label="上一处差异">↑ 上一处</button><button data-action="next" aria-label="下一处差异">↓ 下一处</button><button data-action="copy-result">复制差异</button></div></div>
+      <section class="dd-review" aria-label="差异结果"><div class="dd-review-tools"><div class="dd-view"><button data-action="view-split" aria-pressed="true">双栏</button><button data-action="view-unified" aria-pressed="false">合并</button><button data-action="view-lines" aria-pressed="false">逐行</button><button class="dd-fold-toggle" data-action="toggle-fold" aria-pressed="true">折叠未变更</button></div><div><button data-action="previous" aria-label="上一处差异">↑ 上一处</button><button data-action="next" aria-label="下一处差异">↓ 下一处</button><button data-action="copy-result">复制差异</button></div></div>
       <div data-result class="dd-result"><div class="dd-empty">准备好两个版本后，点击「开始对比」。</div></div></section>`;
     const opts={signal:this.abort.signal};
     root.addEventListener('click',e=>{
@@ -110,6 +113,11 @@ export class DiffPanel {
         this.view=action==='view-unified'?'unified':'split';
         this.setPressed('view-',action);this.render(action==='view-lines');return;
       }
+      if(action==='toggle-fold') {
+        this.folded=!this.folded;
+        this.el('[data-action=toggle-fold]').setAttribute('aria-pressed',String(this.folded));
+        this.render(this.showsLines());return;
+      }
       if(action==='next' || action==='previous') {this.navigate(action==='next'?1:-1);return;}
       if(action==='copy-result') {
         if(!this.result)throw new Error('请先完成对比。');
@@ -156,11 +164,23 @@ export class DiffPanel {
       if(this.disposed || stamp!==this.generation)return;
       this.result=result;this.activeChange=-1;
       const coarse=this.result.coarse?`　其中 ${this.result.coarse} 个区块改动过大，已按整块标记`:'';
-      this.status(this.result.changed?`${titles[0]} → ${titles[1]}　新增 ${this.result.added} 字符 · 删除 ${this.result.removed} 字符${coarse}`:'两个版本完全一致（已统一 CRLF / LF 换行）。');
-      this.render(this.el('[data-action=view-lines]').getAttribute('aria-pressed')==='true');
+      const hunks=this.result.rows.filter(isChangedRow).length;
+      this.status(this.result.changed?`${titles[0]} → ${titles[1]}　共 ${hunks} 处改动 · 新增 ${this.result.added} 字符 · 删除 ${this.result.removed} 字符${coarse}`:'两个版本完全一致（已统一 CRLF / LF 换行）。');
+      this.render(this.showsLines());
     } catch(error) {
       if(!this.disposed && stamp===this.generation)this.status(error instanceof Error?error.message:String(error));
     }finally{if(!this.disposed && stamp===this.generation)this.el<HTMLButtonElement>('[data-action=compare]').disabled=false;}
+  }
+  private showsLines() {return this.el('[data-action=view-lines]').getAttribute('aria-pressed')==='true';}
+  /** 折叠项点击后就地换成原来的行，不重新渲染，保留滚动位置和当前差异。 */
+  private appendRows(target:HTMLElement,changed:boolean[],build:(index:number)=>HTMLElement[]) {
+    const items=this.folded?foldRows(changed):changed.map((_,index)=>({kind:'row' as const,index}));
+    for(const item of items) {
+      if(item.kind==='row') {target.append(...build(item.index));continue;}
+      const bar=document.createElement('button');bar.className='dd-fold';bar.textContent=`展开 ${item.count} 行未变更内容`;
+      bar.addEventListener('click',()=>bar.replaceWith(...Array.from({length:item.count},(_,k)=>build(item.start+k)).flat()),{signal:this.abort.signal});
+      target.append(bar);
+    }
   }
   private render(lines=false) {
     if(!this.result)return;
@@ -173,25 +193,34 @@ export class DiffPanel {
     };
     if(lines) {
       const list=document.createElement('div');list.className='dd-lines';
-      let left=0,right=0;
-      this.result.lines.forEach((s,index)=>{
-        const row=document.createElement('div');row.className=`dd-line dd-line-${s.op}`;
-        const numbers=document.createElement('span');numbers.className='dd-line-number';
-        numbers.textContent=`${s.op==='add'?'':++left} │ ${s.op==='remove'?'':++right} ${s.op==='add'?'+':s.op==='remove'?'−':' '}`;
-        row.append(numbers);append(row,s,index);list.append(row);
+      let left=0,right=0,hunk=-1,previous='equal';
+      // 行号和所属改动先算好，折叠的行展开时才不会错位。
+      const rows=this.result.lines.map(segment=>{
+        if(segment.op!=='equal' && previous==='equal')hunk++;
+        previous=segment.op;
+        return {segment,hunk,label:`${segment.op==='add'?'':++left} │ ${segment.op==='remove'?'':++right} ${segment.op==='add'?'+':segment.op==='remove'?'−':' '}`};
+      });
+      this.appendRows(list,rows.map(r=>r.segment.op!=='equal'),i=>{
+        const row=document.createElement('div');row.className=`dd-line dd-line-${rows[i].segment.op}`;
+        const numbers=document.createElement('span');numbers.className='dd-line-number';numbers.textContent=rows[i].label;
+        row.append(numbers);append(row,rows[i].segment,rows[i].hunk);return [row];
       });container.append(list);
     } else if(this.view==='unified') {
       const pre=document.createElement('div');pre.className='dd-content';
-      this.result.segments.forEach((s,i)=>append(pre,s,i));container.append(pre);
+      const rows=this.result.rows;
+      this.appendRows(pre,rows.map(isChangedRow),i=>{
+        const row=document.createElement('div');row.className='dd-row';
+        rows[i].forEach(s=>append(row,s,i));return [row];
+      });container.append(pre);
     } else {
       const grid=document.createElement('div');grid.className='dd-split';grid.setAttribute('aria-label','双栏差异');
-      let index=0;
-      for(const row of this.result.rows) {
+      const rows=this.result.rows;
+      this.appendRows(grid,rows.map(isChangedRow),i=>{
         const left=document.createElement('div'),right=document.createElement('div');
-        left.className=right.className='dd-cell';
-        for(const s of row) {if(s.op!=='add')append(left,s,index);if(s.op!=='remove')append(right,s,index);index++;}
-        grid.append(left,right);
-      }
+        left.className='dd-cell';right.className='dd-cell dd-cell-right';
+        for(const s of rows[i]) {if(s.op!=='add')append(left,s,i);if(s.op!=='remove')append(right,s,i);}
+        return [left,right];
+      });
       container.append(grid);
     }
     this.activeChange=-1;

@@ -84,6 +84,45 @@ describe('两个功能块和差异审阅',()=>{
     expect(root.querySelector('[data-selected=right]')!.textContent).toContain('乙');
     expect(root.querySelector('del')!.textContent).toBe('旧');
   });
+  const longText=(changed:string)=>Array.from({length:30},(_,i)=>i===15?changed:`第${i}行`).join('\n');
+  const compareLong=async(root:HTMLElement)=>{
+    click(root,'mode-text');const fields=root.querySelectorAll('textarea');
+    fields[0].value=longText('旧');fields[1].value=longText('新');click(root,'compare');await tick();
+  };
+  it('默认折叠未变更内容，点击后就地展开',async()=>{
+    const {root}=setup();await compareLong(root);
+    const result=root.querySelector('[data-result]')!;
+    expect(result.textContent).not.toContain('第0行');expect(result.textContent).toContain('第12行');
+    const bars=root.querySelectorAll<HTMLButtonElement>('.dd-fold');
+    expect(bars).toHaveLength(2);expect(bars[0].textContent).toContain('12');
+    bars[0].click();
+    expect(result.textContent).toContain('第0行');expect(root.querySelectorAll('.dd-fold')).toHaveLength(1);
+    expect(root.querySelectorAll('.dd-cell')).toHaveLength(2*(12+7));
+  });
+  it('可关闭折叠，切换视图时保持设置',async()=>{
+    const {root}=setup();await compareLong(root);
+    click(root,'toggle-fold');
+    expect(root.querySelector('[data-action=toggle-fold]')!.getAttribute('aria-pressed')).toBe('false');
+    expect(root.querySelectorAll('.dd-fold')).toHaveLength(0);expect(root.querySelector('[data-result]')!.textContent).toContain('第0行');
+    click(root,'view-lines');expect(root.querySelectorAll('.dd-fold')).toHaveLength(0);
+    click(root,'toggle-fold');expect(root.querySelectorAll('.dd-fold')).toHaveLength(2);
+  });
+  it('三种视图都能折叠，逐行视图的行号不受影响',async()=>{
+    const {root}=setup();await compareLong(root);
+    click(root,'view-unified');expect(root.querySelectorAll('.dd-fold')).toHaveLength(2);
+    click(root,'view-lines');expect(root.querySelectorAll('.dd-fold')).toHaveLength(2);
+    expect(root.querySelector('.dd-line .dd-line-number')!.textContent).toContain('13 │ 13');
+  });
+  it('连续改动算作一处，一次跳转选中整处',async()=>{
+    const {root}=setup();click(root,'mode-text');const fields=root.querySelectorAll('textarea');
+    fields[0].value='甲\n旧一\n旧二\n丙\n旧三';fields[1].value='甲\n新一\n新二\n新加\n丙\n新三';click(root,'compare');await tick();
+    expect(root.querySelector('[role=status]')!.textContent).toContain('2 处改动');
+    click(root,'next');expect(root.querySelector('[role=status]')!.textContent).toContain('1 / 2');
+    expect(root.querySelectorAll('.dd-current').length).toBeGreaterThan(1);
+    click(root,'view-lines');click(root,'next');
+    expect(root.querySelector('[role=status]')!.textContent).toContain('1 / 2');
+    expect(root.querySelectorAll('.dd-current')).toHaveLength(5);
+  });
   it('双栏按行成对渲染，新增行左侧留空保持对齐',async()=>{
     const {root}=setup();click(root,'mode-text');const fields=root.querySelectorAll('textarea');
     fields[0].value='甲\n乙';fields[1].value='甲\n新增\n乙';click(root,'compare');await tick();
