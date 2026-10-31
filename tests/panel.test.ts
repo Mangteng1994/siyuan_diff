@@ -53,6 +53,28 @@ describe('两个功能块和差异审阅',()=>{
     root.querySelector('[data-search=left]')!.dispatchEvent(new Event('input',{bubbles:true}));
     expect(root.querySelector('[data-result] ins, [data-result] del')).not.toBeNull();
   });
+  it('搜索框按 Enter 触发搜索，输入法组字时不触发',async()=>{
+    const {root,client}=setup();const search=vi.spyOn(client,'searchDocuments').mockResolvedValue([]);
+    const input=root.querySelector<HTMLInputElement>('[data-search=right]')!;input.value='甲';
+    input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,isComposing:true}));
+    expect(search).not.toHaveBeenCalled();
+    input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await tick();
+    expect(search).toHaveBeenCalledWith('甲');
+  });
+  it('选中搜索结果后持续显示标题，改动来源时不残留旧标题',async()=>{
+    const {root,client}=setup();
+    vi.spyOn(client,'searchDocuments').mockResolvedValue([{id:'20261020123456-abcdefh',title:'工作/周报'}]);
+    const shown=(side:string)=>root.querySelector<HTMLElement>(`[data-selected=${side}]`)!;
+    click(root,'search-left');await tick();root.querySelector<HTMLButtonElement>('[data-choices=left] button')!.click();
+    expect(shown('left').textContent).toContain('工作/周报');expect(shown('left').hidden).toBe(false);
+    click(root,'swap');expect(shown('left').hidden).toBe(true);expect(shown('right').textContent).toContain('工作/周报');
+    const input=root.querySelector<HTMLInputElement>('[data-doc-id=right]')!;
+    input.dispatchEvent(new Event('input',{bubbles:true}));expect(shown('right').hidden).toBe(true);
+    click(root,'search-left');await tick();root.querySelector<HTMLButtonElement>('[data-choices=left] button')!.click();
+    click(root,'current-left');expect(shown('left').hidden).toBe(true);
+    click(root,'search-left');await tick();root.querySelector<HTMLButtonElement>('[data-choices=left] button')!.click();
+    click(root,'clear');expect(shown('left').hidden).toBe(true);
+  });
   it('双栏按行成对渲染，新增行左侧留空保持对齐',async()=>{
     const {root}=setup();click(root,'mode-text');const fields=root.querySelectorAll('textarea');
     fields[0].value='甲\n乙';fields[1].value='甲\n新增\n乙';click(root,'compare');await tick();

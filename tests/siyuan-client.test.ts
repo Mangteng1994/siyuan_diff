@@ -13,6 +13,18 @@ describe('思源只读文档接口', () => {
     expect(await client.readDocument(id)).toEqual({id,title:'标题',markdown:'# 标题\n正文'});
     expect(request.mock.calls.map(c=>c[0])).toEqual(['/api/query/sql','/api/export/exportMdContent']);
   });
+  it('导出时关闭元数据和自动标题，避免标题与时间被算作差异', async () => {
+    const request = vi.fn().mockResolvedValueOnce({code:0,data:[{id,type:'d',content:'标题'}]})
+      .mockResolvedValueOnce({code:0,data:{content:'正文'}});
+    await new SiyuanClient(request).readDocument(id);
+    expect(request.mock.calls[1][1]).toEqual({id,yfm:false,addTitle:false});
+  });
+  it('搜索结果带笔记本名，未知笔记本时只显示路径', async () => {
+    const request = vi.fn().mockImplementation(async (path:string)=>path==='/api/query/sql'
+      ?{code:0,data:[{id,type:'d',box:'b1',content:'同名',hpath:'/甲/同名'},{id:'x',type:'d',box:'b2',content:'同名',hpath:'/同名'}]}
+      :{code:0,data:{notebooks:[{id:'b1',name:'工作'}]}});
+    expect(await new SiyuanClient(request).searchDocuments('同名')).toEqual([{id,title:'工作/甲/同名'},{id:'x',title:'/同名'}]);
+  });
   it('拒绝将段落块当成完整文档', async () => {
     const request = vi.fn().mockResolvedValue({code:0,data:[{id,type:'p',content:'段落'}]});
     await expect(new SiyuanClient(request).readDocument(id)).rejects.toThrow(/完整文档/);

@@ -12,6 +12,7 @@ export class DiffPanel {
   private activeChange = -1;
   private abort = new AbortController();
   private searchGeneration = {left:0,right:0};
+  private selectedTitles = {left:'',right:''};
   constructor(private root:HTMLElement,private client=new SiyuanClient(),private currentDocument:()=>string|undefined=()=>undefined) {
     root.classList.add('document-diff');
     root.innerHTML=`
@@ -20,7 +21,7 @@ export class DiffPanel {
       <section class="dd-inputs" aria-label="对比内容">
         ${(['left','right'] as Side[]).map((side,index)=>`<div class="dd-source"><div class="dd-source-title"><strong>${index?'修改后':'原文'}</strong><span>${index?'B':'A'}</span></div>
           <div data-document-source><label>文档 ID 或链接<input data-doc-id="${side}" placeholder="粘贴思源文档链接或 ID" autocomplete="off"></label>
-          <div class="dd-source-actions"><button data-action="current-${side}">使用当前文档</button></div>
+          <div class="dd-source-actions"><span data-selected="${side}" class="dd-selected" hidden></span><button data-action="current-${side}">使用当前文档</button></div>
           <div class="dd-search"><label>按标题搜索<input data-search="${side}" placeholder="输入标题关键词" autocomplete="off"></label><button data-action="search-${side}">搜索</button></div>
           <div data-choices="${side}" class="dd-choices" aria-live="polite"></div></div>
           <div data-text-source hidden><div class="dd-source-actions"><button data-action="paste-${side}">读取剪贴板</button></div><label class="dd-sr">${index?'修改后文段':'原文文段'}</label><textarea data-text="${side}" aria-label="${index?'修改后文段':'原文文段'}" placeholder="在此粘贴${index?'修改后':'原文'}文段…" spellcheck="false"></textarea></div>
@@ -35,15 +36,27 @@ export class DiffPanel {
       const button=(e.target as HTMLElement).closest<HTMLButtonElement>('button[data-action]');
       if(button && !button.disabled) void this.action(button.dataset.action!);
     },opts);
-    root.addEventListener('input',e=>{if(!(e.target as HTMLElement).matches('[data-search]'))this.invalidate();},opts);
+    root.addEventListener('input',e=>{
+      const target=e.target as HTMLElement;
+      if(target.matches('[data-search]'))return;
+      if(target.dataset.docId)this.select(target.dataset.docId as Side);
+      this.invalidate();
+    },opts);
     root.addEventListener('keydown',e=>{
-      if((e.ctrlKey || e.metaKey) && e.key==='Enter') {e.preventDefault();void this.action('compare');}
+      if((e.ctrlKey || e.metaKey) && e.key==='Enter') {e.preventDefault();void this.action('compare');return;}
+      const target=e.target as HTMLElement;
+      if(e.key==='Enter' && !e.isComposing && target.matches('[data-search]')) {e.preventDefault();void this.action(`search-${target.dataset.search}`);}
     },opts);
   }
   private el<T extends HTMLElement=HTMLElement>(selector:string):T {return this.root.querySelector<T>(selector)!;}
   private text(side:Side) {return this.el<HTMLTextAreaElement>(`[data-text="${side}"]`);}
   private id(side:Side) {return this.el<HTMLInputElement>(`[data-doc-id="${side}"]`);}
   private status(message:string) {if(!this.disposed)this.el('[role=status]').textContent=message;}
+  private select(side:Side,title='') {
+    this.selectedTitles[side]=title;
+    const label=this.el(`[data-selected="${side}"]`);
+    label.textContent=title?`已选择：${title}`:'';label.hidden=!title;
+  }
   private invalidate() {
     this.generation++;this.result=undefined;this.activeChange=-1;
     this.el<HTMLButtonElement>('[data-action=compare]').disabled=false;
@@ -61,7 +74,8 @@ export class DiffPanel {
       if(action==='compare') {await this.run();return;}
       if(action.startsWith('current-')) {
         const id=this.currentDocument();if(!id)throw new Error('请先打开一篇思源文档，再使用当前文档。');
-        this.id(action.endsWith('left')?'left':'right').value=id;this.invalidate();return;
+        const side=action.endsWith('left')?'left':'right';
+        this.id(side).value=id;this.select(side);this.invalidate();return;
       }
       if(action.startsWith('search-')) {await this.search(action.endsWith('left')?'left':'right');return;}
       if(action.startsWith('paste-')) {
@@ -75,11 +89,13 @@ export class DiffPanel {
         for(const getter of [(s:Side)=>this.text(s),(s:Side)=>this.id(s)]) {
           const left=getter('left'),right=getter('right');[left.value,right.value]=[right.value,left.value];
         }
+        const {left,right}=this.selectedTitles;this.select('left',right);this.select('right',left);
         this.invalidate();return;
       }
       if(action==='clear') {
         this.root.querySelectorAll<HTMLInputElement|HTMLTextAreaElement>('input,textarea').forEach(e=>e.value='');
         this.root.querySelectorAll('[data-choices]').forEach(e=>e.replaceChildren());
+        this.select('left');this.select('right');
         this.searchGeneration.left++;this.searchGeneration.right++;this.invalidate();return;
       }
       if(action.startsWith('view-')) {
@@ -108,7 +124,7 @@ export class DiffPanel {
       const choices=this.el(`[data-choices="${side}"]`);choices.replaceChildren();
       for(const doc of list) {
         const button=document.createElement('button');button.textContent=doc.title;button.title=doc.id;
-        button.addEventListener('click',()=>{this.id(side).value=doc.id;choices.replaceChildren();this.invalidate();this.status(`已选择：${doc.title}`);},{signal:this.abort.signal});
+        button.addEventListener('click',()=>{this.id(side).value=doc.id;this.select(side,doc.title);choices.replaceChildren();this.invalidate();this.status(`已选择：${doc.title}`);},{signal:this.abort.signal});
         choices.append(button);
       }
       this.status(list.length?`找到 ${list.length} 篇文档，点击标题选择（最多显示 50 篇）。`:'没有找到文档，请调整关键词。');

@@ -1,6 +1,6 @@
 export interface DocumentInfo {id:string; title:string}
 export interface DocumentContent extends DocumentInfo {markdown:string}
-interface Block {id:string;type:string;content:string;hpath?:string}
+interface Block {id:string;type:string;content:string;hpath?:string;box?:string}
 interface ResponseData {code:number;msg?:string;data?:unknown}
 export type Request = (path:string, body:Record<string,unknown>)=>Promise<ResponseData>;
 export function parseDocumentId(value:string):string {
@@ -29,14 +29,17 @@ export class SiyuanClient {
   }
   async searchDocuments(query:string):Promise<DocumentInfo[]> {
     const q=query.trim().slice(0,100).replace(/'/g,"''").replace(/[\\%_]/g,'\\$&');
-    const blocks=await this.query(`SELECT id, type, content, hpath FROM blocks WHERE type = 'd' AND content LIKE '%${q}%' ESCAPE '\\' ORDER BY updated DESC LIMIT 50`);
-    return blocks.map(b=>({id:b.id,title:b.hpath || b.content}));
+    const blocks=await this.query(`SELECT id, type, content, hpath, box FROM blocks WHERE type = 'd' AND content LIKE '%${q}%' ESCAPE '\\' ORDER BY updated DESC LIMIT 50`);
+    if(!blocks.length)return [];
+    const data=await this.call('/api/notebook/lsNotebooks',{}) as {notebooks?:{id:string;name:string}[]}|null;
+    const notebooks=new Map(data?.notebooks?.map(n=>[n.id,n.name]));
+    return blocks.map(b=>({id:b.id,title:(notebooks.get(b.box ?? '') ?? '')+(b.hpath || b.content)}));
   }
   async readDocument(input:string):Promise<DocumentContent> {
     const id=parseDocumentId(input);
     const blocks=await this.query(`SELECT id, type, content FROM blocks WHERE id = '${id}' LIMIT 1`);
     if(blocks[0]?.type!=='d')throw new Error('请选择完整文档，当前 ID 不是文档或文档已删除。');
-    const data=await this.call('/api/export/exportMdContent',{id}) as {content?:unknown}|null;
+    const data=await this.call('/api/export/exportMdContent',{id,yfm:false,addTitle:false}) as {content?:unknown}|null;
     if(typeof data?.content!=='string')throw new Error('思源返回了无效的 Markdown 内容');
     return {id,title:blocks[0].content,markdown:data.content};
   }
