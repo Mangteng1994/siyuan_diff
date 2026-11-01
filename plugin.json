@@ -2,7 +2,7 @@
   "name": "siyuan_diff",
   "author": "Mangteng1994",
   "url": "https://github.com/Mangteng1994/siyuan_diff",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "minAppVersion": "3.8.9",
   "backends": [
     "all"
