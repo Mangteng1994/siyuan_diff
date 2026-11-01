@@ -17,6 +17,14 @@ describe('集市发布元数据',()=>{
     expect(manifest.author).toBe('Mangteng1994');
     expect(manifest.displayName.default).toBe('文档Diff');
   });
+  it('集市图标和预览图随仓库提供，尺寸正确',()=>{
+    const size=(name:string)=>{const png=readFileSync(name);return [png.readUInt32BE(16),png.readUInt32BE(20)];};
+    expect(size('icon.png')).toEqual([160,160]);
+    expect(size('preview.png')).toEqual([1024,768]);
+  });
+  it('最低版本不低于实测过文件历史接口的版本',()=>{
+    expect(manifest.minAppVersion).toBe('3.8.9');
+  });
   it('按已验收的桌面端范围发布',()=>{
     expect(manifest.frontends).toEqual(['desktop','desktop-window','browser-desktop']);
     expect(manifest.disabledInPublish).toBe(true);
