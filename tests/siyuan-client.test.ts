@@ -25,6 +25,43 @@ describe('思源只读文档接口', () => {
       :{code:0,data:{notebooks:[{id:'b1',name:'工作'}]}});
     expect(await new SiyuanClient(request).searchDocuments('同名')).toEqual([{id,title:'工作/甲/同名'},{id:'x',title:'/同名'}]);
   });
+  const historyRequest=()=>vi.fn().mockImplementation(async (path:string)=>{
+    if(path==='/api/query/sql')return {code:0,data:[{id,type:'d',content:'标题'}]};
+    if(path==='/api/history/searchHistory')return {code:0,data:{histories:['1793116892']}};
+    if(path==='/api/history/getDocHistorySnapshots')return {code:0,data:{histories:[{created:'1793116892',historyPath:'/history/2026-10-28-000132-update/b/x.sy'}]}};
+    return {code:0,data:{left:{content:'旧 DOM'},right:{content:'新 DOM'},large:false,message:''}};
+  });
+  it('按文档 ID 列出历史版本，显示时间和操作类型', async () => {
+    const request=historyRequest();
+    const versions=await new SiyuanClient(request).listHistory(id);
+    expect(versions).toHaveLength(1);expect(versions[0].path).toContain('update');expect(versions[0].label).toContain('更新');
+    expect(request.mock.calls.find(c=>c[0]==='/api/history/searchHistory')![1]).toEqual({query:id,page:1,op:'all',type:3});
+  });
+  it('没有历史时不继续请求，段落块被拒绝', async () => {
+    const request=vi.fn().mockImplementation(async (path:string)=>path==='/api/query/sql'?{code:0,data:[{id,type:'d',content:'标题'}]}:{code:0,data:{histories:null}});
+    expect(await new SiyuanClient(request).listHistory(id)).toEqual([]);
+    expect(request.mock.calls.some(c=>c[0]==='/api/history/getDocHistorySnapshots')).toBe(false);
+    await expect(new SiyuanClient(vi.fn().mockResolvedValue({code:0,data:[{id,type:'p',content:'段落'}]})).listHistory(id)).rejects.toThrow(/完整文档/);
+  });
+  it('两侧内容来自同一接口并用同一转换，只调用只读接口', async () => {
+    const request=historyRequest();
+    const result=await new SiyuanClient(request,html=>`转换:${html}`).readHistory('/history/x.sy',id);
+    expect(result).toEqual({original:'转换:旧 DOM',current:'转换:新 DOM'});
+    expect(request.mock.calls[0]).toEqual(['/api/history/diffDocVersions',{left:{type:'history',path:'/history/x.sy'},right:{type:'current',id}}]);
+  });
+  it('文档过大或内容缺失时明确报错', async () => {
+    const reject=(data:unknown)=>new SiyuanClient(vi.fn().mockResolvedValue({code:0,data}),html=>html).readHistory('/h',id);
+    await expect(reject({large:true,left:{content:'a'},right:{content:'b'},message:'文档太大'})).rejects.toThrow('文档太大');
+    await expect(reject({left:null,right:null,message:''})).rejects.toThrow(/无法对比/);
+  });
+  it('默认转换前恢复 Lute 需要的可编辑标记', async () => {
+    const BlockDOM2StdMd=vi.fn().mockReturnValue('正文');
+    vi.stubGlobal('window',{Lute:{New:()=>({BlockDOM2StdMd})}});
+    const data={left:{content:'<div contenteditable="false">甲</div>'},right:{content:'乙'}};
+    await new SiyuanClient(vi.fn().mockResolvedValue({code:0,data})).readHistory('/h',id);
+    expect(BlockDOM2StdMd).toHaveBeenCalledWith('<div contenteditable="true">甲</div>');
+    vi.unstubAllGlobals();
+  });
   it('拒绝将段落块当成完整文档', async () => {
     const request = vi.fn().mockResolvedValue({code:0,data:[{id,type:'p',content:'段落'}]});
     await expect(new SiyuanClient(request).readDocument(id)).rejects.toThrow(/完整文档/);

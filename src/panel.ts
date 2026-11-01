@@ -7,7 +7,7 @@ type Side = 'left' | 'right';
 const isChangedRow=(row:Segment[])=>row.some(s=>s.op!=='equal');
 /** 面板状态仅驻留内存，不保存笔记或剪贴板内容。 */
 export class DiffPanel {
-  private mode: 'document' | 'text' = 'document';
+  private mode: 'document' | 'text' | 'history' = 'document';
   private view: 'split' | 'unified' = 'split';
   private folded = true;
   private result?: Comparison;
@@ -18,17 +18,19 @@ export class DiffPanel {
   private abort = new AbortController();
   private searchGeneration = {left:0,right:0};
   private selectedTitles = {left:'',right:''};
+  private history = {generation:0,path:'',label:''};
   constructor(private root:HTMLElement,private client=new SiyuanClient(),private currentDocument:()=>string|undefined=()=>undefined) {
     root.classList.add('document-diff');
     root.innerHTML=`
       <header class="dd-header"><div><h2>文档 Diff</h2><p>逐字看清每一次修改</p></div><span class="dd-local">只读 · 本地对比</span></header>
-      <nav class="dd-modes" aria-label="对比来源"><button data-action="mode-document" aria-pressed="true">文档对比</button><button data-action="mode-text" aria-pressed="false">复制文段对比</button></nav>
+      <nav class="dd-modes" aria-label="对比来源"><button data-action="mode-document" aria-pressed="true">文档对比</button><button data-action="mode-text" aria-pressed="false">复制文段对比</button><button data-action="mode-history" aria-pressed="false">历史版本对比</button></nav>
       <section class="dd-inputs" aria-label="对比内容">
-        ${(['left','right'] as Side[]).map((side,index)=>`<div class="dd-source"><div class="dd-source-title"><strong>${index?'修改后':'原文'}</strong><span>${index?'B':'A'}</span></div>
+        ${(['left','right'] as Side[]).map((side,index)=>`<div class="dd-source"><div class="dd-source-title"><strong data-source-title="${side}">${index?'修改后':'原文'}</strong><span>${index?'B':'A'}</span></div>
           <div data-document-source><label>文档 ID 或链接<input data-doc-id="${side}" placeholder="粘贴思源文档链接或 ID" autocomplete="off"></label>
           <div class="dd-source-actions"><span data-selected="${side}" class="dd-selected" hidden></span><button data-action="current-${side}">使用当前文档</button></div>
           <div class="dd-search"><label>按标题搜索<input data-search="${side}" placeholder="输入标题关键词" autocomplete="off"></label><button data-action="search-${side}">搜索</button></div>
           <div data-choices="${side}" class="dd-choices" aria-live="polite"></div></div>
+          ${index?'':'<div data-history-source hidden><div class="dd-source-actions"><span class="dd-selected">在右侧选择文档后，点击一个版本开始对比。</span><button data-action="load-history">加载历史版本</button></div><div data-history-list class="dd-choices" aria-live="polite"></div></div>'}
           <div data-text-source hidden><div class="dd-source-actions"><button data-action="paste-${side}">读取剪贴板</button></div><label class="dd-sr">${index?'修改后文段':'原文文段'}</label><textarea data-text="${side}" aria-label="${index?'修改后文段':'原文文段'}" placeholder="在此粘贴${index?'修改后':'原文'}文段…" spellcheck="false"></textarea></div>
         </div>`).join('')}
       </section>
@@ -61,6 +63,37 @@ export class DiffPanel {
     this.selectedTitles[side]=title;
     const label=this.el(`[data-selected="${side}"]`);
     label.textContent=title?`已选择：${title}`:'';label.hidden=!title;
+    // 历史版本属于右侧文档，文档一换旧列表就失效。
+    if(side==='right')this.resetHistory();
+  }
+  private resetHistory() {
+    this.history={generation:this.history.generation+1,path:'',label:''};
+    this.el('[data-history-list]').replaceChildren();
+  }
+  private async loadHistory() {
+    this.resetHistory();
+    const stamp=this.history.generation;
+    this.status('正在读取历史版本…');
+    try {
+      const versions=await this.client.listHistory(this.id('right').value);
+      if(this.disposed || stamp!==this.history.generation)return;
+      const list=this.el('[data-history-list]');
+      for(const version of versions) {
+        const button=document.createElement('button');button.textContent=version.label;button.setAttribute('aria-pressed','false');
+        button.addEventListener('click',()=>{
+          list.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+          this.history.path=version.path;this.history.label=version.label;
+          this.invalidate();void this.action('compare');
+        },{signal:this.abort.signal});
+        list.append(button);
+      }
+      this.status(versions.length?`找到 ${versions.length} 个历史版本，点击选择。`:'这篇文档还没有历史版本。');
+    }catch(error){if(!this.disposed && stamp===this.history.generation)this.status(error instanceof Error?error.message:String(error));}
+  }
+  showHistory(doc:{id:string;title:string}) {
+    void this.action('mode-history');
+    this.id('right').value=doc.id;this.select('right',doc.title);
+    this.invalidate();void this.loadHistory();
   }
   private invalidate() {
     this.generation++;this.task?.cancel();this.result=undefined;this.activeChange=-1;
@@ -77,17 +110,25 @@ export class DiffPanel {
   private async action(action:string) {
     try {
       if(action.startsWith('mode-')) {
-        this.mode=action==='mode-text'?'text':'document';this.invalidate();
-        this.root.querySelectorAll<HTMLElement>('[data-document-source]').forEach(e=>e.hidden=this.mode!=='document');
+        this.mode=action==='mode-text'?'text':action==='mode-history'?'history':'document';this.invalidate();
+        const history=this.mode==='history';
+        // 历史模式下左侧是版本列表，右侧仍是文档来源。
+        this.root.querySelectorAll<HTMLElement>('[data-document-source]').forEach((e,index)=>e.hidden=this.mode==='text' || (history && index===0));
         this.root.querySelectorAll<HTMLElement>('[data-text-source]').forEach(e=>e.hidden=this.mode!=='text');
+        this.el('[data-history-source]').hidden=!history;
+        this.el('[data-source-title=left]').textContent=history?'历史版本':'原文';
+        this.el('[data-source-title=right]').textContent=history?'当前文档':'修改后';
         this.setPressed('mode-',action);return;
       }
       if(action==='compare') {await this.run();return;}
       if(action.startsWith('current-')) {
         const id=this.currentDocument();if(!id)throw new Error('请先打开一篇思源文档，再使用当前文档。');
         const side=action.endsWith('left')?'left':'right';
-        this.id(side).value=id;this.select(side);this.invalidate();return;
+        this.id(side).value=id;this.select(side);this.invalidate();
+        if(this.mode==='history' && side==='right')await this.loadHistory();
+        return;
       }
+      if(action==='load-history') {await this.loadHistory();return;}
       if(action.startsWith('search-')) {await this.search(action.endsWith('left')?'left':'right');return;}
       if(action.startsWith('paste-')) {
         const side=action.endsWith('left')?'left':'right';
@@ -97,6 +138,7 @@ export class DiffPanel {
         if(!this.disposed && stamp===this.generation){this.text(side).value=text;this.invalidate();}return;
       }
       if(action==='swap') {
+        if(this.mode==='history')throw new Error('历史版本对比不支持交换左右。');
         for(const getter of [(s:Side)=>this.text(s),(s:Side)=>this.id(s)]) {
           const left=getter('left'),right=getter('right');[left.value,right.value]=[right.value,left.value];
         }
@@ -140,7 +182,7 @@ export class DiffPanel {
       const choices=this.el(`[data-choices="${side}"]`);choices.replaceChildren();
       for(const doc of list) {
         const button=document.createElement('button');button.textContent=doc.title;button.title=doc.id;
-        button.addEventListener('click',()=>{this.id(side).value=doc.id;this.select(side,doc.title);choices.replaceChildren();this.invalidate();this.status(`已选择：${doc.title}`);},{signal:this.abort.signal});
+        button.addEventListener('click',()=>{this.id(side).value=doc.id;this.select(side,doc.title);choices.replaceChildren();this.invalidate();this.status(`已选择：${doc.title}`);if(this.mode==='history' && side==='right')void this.loadHistory();},{signal:this.abort.signal});
         choices.append(button);
       }
       this.status(list.length?`找到 ${list.length} 篇文档，点击标题选择（最多显示 50 篇）。`:'没有找到文档，请调整关键词。');
@@ -154,6 +196,11 @@ export class DiffPanel {
     try {
       let a=this.text('left').value,b=this.text('right').value;
       let titles=['原文','修改后'];
+      if(this.mode==='history') {
+        if(!this.history.path)throw new Error('请先在左侧选择一个历史版本。');
+        ({original:a,current:b}=await this.client.readHistory(this.history.path,this.id('right').value));
+        titles=[`历史版本（${this.history.label}）`,'当前版本'];
+      }
       if(this.mode==='document') {
         const docs=await Promise.all([this.client.readDocument(this.id('left').value),this.client.readDocument(this.id('right').value)]);
         [a,b]=docs.map(d=>d.markdown);titles=docs.map(d=>d.title);

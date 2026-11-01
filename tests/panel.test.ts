@@ -123,6 +123,46 @@ describe('两个功能块和差异审阅',()=>{
     expect(root.querySelector('[role=status]')!.textContent).toContain('1 / 2');
     expect(root.querySelectorAll('.dd-current')).toHaveLength(5);
   });
+  const historySetup=()=>{
+    const context=setup();
+    vi.spyOn(context.client,'listHistory').mockResolvedValue([{path:'/h1',label:'昨天 · 更新'},{path:'/h2',label:'前天 · 同步'}]);
+    vi.spyOn(context.client,'readHistory').mockResolvedValue({original:'旧',current:'新'});
+    return context;
+  };
+  it('历史版本页签：选文档、列版本、点击后自动对比',async()=>{
+    const {root,client,panel}=historySetup();
+    panel.showHistory({id:'20261020123456-abcdefg',title:'周报'});await tick();
+    expect(root.querySelector('[data-action=mode-history]')!.getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector<HTMLElement>('[data-history-source]')!.hidden).toBe(false);
+    expect(root.querySelectorAll<HTMLElement>('[data-document-source]')[0].hidden).toBe(true);
+    expect(root.querySelectorAll<HTMLElement>('[data-document-source]')[1].hidden).toBe(false);
+    expect(root.querySelector('[data-source-title=left]')!.textContent).toBe('历史版本');
+    const buttons=root.querySelectorAll<HTMLButtonElement>('[data-history-list] button');expect(buttons).toHaveLength(2);
+    buttons[1].click();await tick();
+    expect(client.readHistory).toHaveBeenCalledWith('/h2','20261020123456-abcdefg');
+    expect(root.querySelector('del')!.textContent).toBe('旧');expect(buttons[1].getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[role=status]')!.textContent).toContain('前天 · 同步');
+  });
+  it('未选版本不能对比，也不支持交换',async()=>{
+    const {root}=historySetup();click(root,'mode-history');
+    click(root,'compare');await tick();expect(root.querySelector('[role=status]')!.textContent).toContain('历史版本');
+    click(root,'swap');await tick();expect(root.querySelector('[role=status]')!.textContent).toContain('交换');
+  });
+  it('换了文档后清掉旧的历史列表和选择',async()=>{
+    const {root,client,panel}=historySetup();
+    panel.showHistory({id:'20261020123456-abcdefg',title:'周报'});await tick();
+    root.querySelector<HTMLButtonElement>('[data-history-list] button')!.click();await tick();
+    const input=root.querySelector<HTMLInputElement>('[data-doc-id=right]')!;input.value='20261020123456-abcdefh';
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    expect(root.querySelectorAll('[data-history-list] button')).toHaveLength(0);
+    click(root,'compare');await tick();expect(client.readHistory).toHaveBeenCalledTimes(1);
+  });
+  it('使用当前文档时自动加载历史，没有历史时明确提示',async()=>{
+    const {root,client}=historySetup();vi.mocked(client.listHistory).mockResolvedValue([]);
+    click(root,'mode-history');click(root,'current-right');await tick();
+    expect(client.listHistory).toHaveBeenCalledWith('20261020123456-abcdefg');
+    expect(root.querySelector('[role=status]')!.textContent).toContain('没有历史版本');
+  });
   it('双栏按行成对渲染，新增行左侧留空保持对齐',async()=>{
     const {root}=setup();click(root,'mode-text');const fields=root.querySelectorAll('textarea');
     fields[0].value='甲\n乙';fields[1].value='甲\n新增\n乙';click(root,'compare');await tick();

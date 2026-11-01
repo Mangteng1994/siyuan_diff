@@ -1,6 +1,6 @@
 export interface DocumentRef {id:string;title:string}
 export interface MenuAction {label:string;click:()=>void}
-interface Handlers {setBase(doc:DocumentRef):void;compare(left:DocumentRef,right:DocumentRef):void}
+interface Handlers {setBase(doc:DocumentRef):void;compare(left:DocumentRef,right:DocumentRef):void;history(doc:DocumentRef):void}
 const TITLE_LIMIT=20;
 
 /** 思源把菜单文字和消息当作 HTML 渲染，文档标题必须转义。 */
@@ -26,5 +26,6 @@ export function buildMenuActions(selected:DocumentRef[],base:DocumentRef|undefin
   const [doc]=selected;
   const actions:MenuAction[]=[{label:'设为对比原文',click:()=>handlers.setBase(doc)}];
   if(base && base.id!==doc.id)actions.push({label:`与「${menuTitle(base.title)}」对比`,click:()=>handlers.compare(base,doc)});
+  actions.push({label:'与历史版本对比',click:()=>handlers.history(doc)});
   return actions;
 }
