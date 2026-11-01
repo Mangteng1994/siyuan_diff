@@ -10,7 +10,7 @@
 
 ## 安装
 
-1. 从 [最新 Release](https://github.com/Mangteng1994/siyuan_diff/releases/latest) 下载 `package.zip`。本地构建也会生成 `dist/package.zip` 和 `dist/siyuan_diff-0.1.1.zip`。
+1. 从 [最新 Release](https://github.com/Mangteng1994/siyuan_diff/releases/latest) 下载 `package.zip`。本地构建也会生成 `dist/package.zip` 和 `dist/siyuan_diff-0.2.0.zip`。
 2. 关闭思源，将安装包中的文件解压到 **思源工作空间** 的 `data/plugins/siyuan_diff/`。确认该目录下直接包含 `plugin.json` 和 `index.js`，不要多嵌套一层目录。
 3. 启动思源，在「设置 → 集市 → 已下载 → 插件」中启用「文档Diff」。
 4. 点击顶栏对比图标，或通过命令面板执行「打开文档Diff」。默认快捷键为 `Alt + Shift + D`（macOS 为 `Option + Shift + D`）。
