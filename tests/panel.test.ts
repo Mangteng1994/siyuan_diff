@@ -163,6 +163,37 @@ describe('两个功能块和差异审阅',()=>{
     expect(client.listHistory).toHaveBeenCalledWith('20261020123456-abcdefg');
     expect(root.querySelector('[role=status]')!.textContent).toContain('没有历史版本');
   });
+  it('刷新重新读取文档，没有结果时提示',async()=>{
+    const {root,client}=setup();click(root,'refresh');await tick();
+    expect(root.querySelector('[role=status]')!.textContent).toContain('请先完成对比');
+    const read=vi.spyOn(client,'readDocument').mockImplementation(async id=>({id,title:id,markdown:'甲'}));
+    root.querySelectorAll<HTMLInputElement>('[data-doc-id]').forEach(x=>x.value='20261020123456-abcdefg');
+    click(root,'compare');await tick();click(root,'refresh');await tick();
+    expect(read).toHaveBeenCalledTimes(4);
+  });
+  it('打开源文档只用已填写的文档 ID，按来源显示按钮',()=>{
+    const root=document.createElement('div');const open=vi.fn();
+    new DiffPanel(root,new SiyuanClient(),()=>undefined,open);
+    root.querySelector<HTMLInputElement>('[data-doc-id=left]')!.value='siyuan://blocks/20261020123456-abcdefg';
+    click(root,'open-left');expect(open).toHaveBeenCalledWith('20261020123456-abcdefg');
+    click(root,'open-right');expect(open).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('[role=status]')!.textContent).toContain('文档');
+    const button=(side:string)=>root.querySelector<HTMLElement>(`[data-action=open-${side}]`)!;
+    click(root,'mode-text');expect(button('left').hidden).toBe(true);expect(button('right').hidden).toBe(true);
+    click(root,'mode-history');expect(button('left').hidden).toBe(true);expect(button('right').hidden).toBe(false);
+    expect(button('right').textContent).toContain('当前文档');
+  });
+  it('导出差异报告为 Markdown 文件，没有结果时提示',async()=>{
+    const {root}=setup();const clicked=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
+    const blobs:Blob[]=[];vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:(b:Blob)=>{blobs.push(b);return 'blob:x';},revokeObjectURL:vi.fn()}));
+    click(root,'export-report');await tick();expect(root.querySelector('[role=status]')!.textContent).toContain('请先完成对比');
+    click(root,'mode-text');const fields=root.querySelectorAll('textarea');fields[0].value='旧';fields[1].value='新';click(root,'compare');await tick();
+    click(root,'export-report');await tick();
+    expect(clicked).toHaveBeenCalledTimes(1);expect(blobs).toHaveLength(1);expect(blobs[0].type).toContain('markdown');
+    expect((clicked.mock.contexts[0] as HTMLAnchorElement).download).toMatch(/^文档差异-\d{8}-\d{6}\.md$/);
+    expect(root.querySelector('[role=status]')!.textContent).toContain('已导出');
+    vi.unstubAllGlobals();clicked.mockRestore();
+  });
   it('双栏按行成对渲染，新增行左侧留空保持对齐',async()=>{
     const {root}=setup();click(root,'mode-text');const fields=root.querySelectorAll('textarea');
     fields[0].value='甲\n乙';fields[1].value='甲\n新增\n乙';click(root,'compare');await tick();

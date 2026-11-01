@@ -1,7 +1,8 @@
 import type { Comparison, Segment } from './diff';
 import { startCompare, type CompareTask } from './diff-runner';
 import { foldRows } from './fold';
-import { SiyuanClient } from './siyuan-client';
+import { buildReport, reportFileName } from './report';
+import { SiyuanClient, parseDocumentId } from './siyuan-client';
 
 type Side = 'left' | 'right';
 const isChangedRow=(row:Segment[])=>row.some(s=>s.op!=='equal');
@@ -11,6 +12,7 @@ export class DiffPanel {
   private view: 'split' | 'unified' = 'split';
   private folded = true;
   private result?: Comparison;
+  private titles: [string,string] = ['原文','修改后'];
   private task?: CompareTask;
   private generation = 0;
   private disposed = false;
@@ -19,7 +21,7 @@ export class DiffPanel {
   private searchGeneration = {left:0,right:0};
   private selectedTitles = {left:'',right:''};
   private history = {generation:0,path:'',label:''};
-  constructor(private root:HTMLElement,private client=new SiyuanClient(),private currentDocument:()=>string|undefined=()=>undefined) {
+  constructor(private root:HTMLElement,private client=new SiyuanClient(),private currentDocument:()=>string|undefined=()=>undefined,private openDocument:(id:string)=>void=()=>{}) {
     root.classList.add('document-diff');
     root.innerHTML=`
       <header class="dd-header"><div><h2>文档 Diff</h2><p>逐字看清每一次修改</p></div><span class="dd-local">只读 · 本地对比</span></header>
@@ -36,7 +38,7 @@ export class DiffPanel {
       </section>
       <div class="dd-actions"><button class="dd-primary" data-action="compare">开始对比</button><button data-action="swap">交换左右</button><button data-action="clear">清空</button><span class="dd-hint">Ctrl / ⌘ + Enter 开始对比</span></div>
       <div class="dd-status" role="status" aria-live="polite">选择两篇文档，或切换到复制文段对比。</div>
-      <section class="dd-review" aria-label="差异结果"><div class="dd-review-tools"><div class="dd-view"><button data-action="view-split" aria-pressed="true">双栏</button><button data-action="view-unified" aria-pressed="false">合并</button><button data-action="view-lines" aria-pressed="false">逐行</button><button class="dd-fold-toggle" data-action="toggle-fold" aria-pressed="true">折叠未变更</button></div><div><button data-action="previous" aria-label="上一处差异">↑ 上一处</button><button data-action="next" aria-label="下一处差异">↓ 下一处</button><button data-action="copy-result">复制差异</button></div></div>
+      <section class="dd-review" aria-label="差异结果"><div class="dd-review-tools"><div class="dd-view"><button data-action="view-split" aria-pressed="true">双栏</button><button data-action="view-unified" aria-pressed="false">合并</button><button data-action="view-lines" aria-pressed="false">逐行</button><button class="dd-fold-toggle" data-action="toggle-fold" aria-pressed="true">折叠未变更</button></div><div><button data-action="previous" aria-label="上一处差异">↑ 上一处</button><button data-action="next" aria-label="下一处差异">↓ 下一处</button><button data-action="refresh">刷新</button><button data-action="open-left">打开原文</button><button data-action="open-right">打开修改后</button><button data-action="copy-result">复制差异</button><button data-action="export-report">导出报告</button></div></div>
       <div data-result class="dd-result"><div class="dd-empty">准备好两个版本后，点击「开始对比」。</div></div></section>`;
     const opts={signal:this.abort.signal};
     root.addEventListener('click',e=>{
@@ -116,6 +118,9 @@ export class DiffPanel {
         this.root.querySelectorAll<HTMLElement>('[data-document-source]').forEach((e,index)=>e.hidden=this.mode==='text' || (history && index===0));
         this.root.querySelectorAll<HTMLElement>('[data-text-source]').forEach(e=>e.hidden=this.mode!=='text');
         this.el('[data-history-source]').hidden=!history;
+        this.el('[data-action=open-left]').hidden=this.mode!=='document';
+        this.el('[data-action=open-right]').hidden=this.mode==='text';
+        this.el('[data-action=open-right]').textContent=history?'打开当前文档':'打开修改后';
         this.el('[data-source-title=left]').textContent=history?'历史版本':'原文';
         this.el('[data-source-title=right]').textContent=history?'当前文档':'修改后';
         this.setPressed('mode-',action);return;
@@ -161,6 +166,20 @@ export class DiffPanel {
         this.render(this.showsLines());return;
       }
       if(action==='next' || action==='previous') {this.navigate(action==='next'?1:-1);return;}
+      if(action==='refresh') {
+        if(!this.result)throw new Error('请先完成对比。');
+        await this.run();return;
+      }
+      if(action==='open-left' || action==='open-right') {
+        this.openDocument(parseDocumentId(this.id(action==='open-left'?'left':'right').value));return;
+      }
+      if(action==='export-report') {
+        if(!this.result)throw new Error('请先完成对比。');
+        const url=URL.createObjectURL(new Blob([buildReport(this.result,...this.titles)],{type:'text/markdown;charset=utf-8'}));
+        const link=document.createElement('a');link.href=url;link.download=reportFileName();link.click();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+        this.status(`已导出：${link.download}`);return;
+      }
       if(action==='copy-result') {
         if(!this.result)throw new Error('请先完成对比。');
         const output=this.result.lines.map(s=>`${s.op==='add'?'+':s.op==='remove'?'-':' '} ${s.text}`).join('\n');
@@ -195,7 +214,7 @@ export class DiffPanel {
     this.el<HTMLButtonElement>('[data-action=compare]').disabled=true;this.status('正在读取并对比…');
     try {
       let a=this.text('left').value,b=this.text('right').value;
-      let titles=['原文','修改后'];
+      let titles:[string,string]=['原文','修改后'];
       if(this.mode==='history') {
         if(!this.history.path)throw new Error('请先在左侧选择一个历史版本。');
         ({original:a,current:b}=await this.client.readHistory(this.history.path,this.id('right').value));
@@ -203,13 +222,13 @@ export class DiffPanel {
       }
       if(this.mode==='document') {
         const docs=await Promise.all([this.client.readDocument(this.id('left').value),this.client.readDocument(this.id('right').value)]);
-        [a,b]=docs.map(d=>d.markdown);titles=docs.map(d=>d.title);
+        [a,b]=docs.map(d=>d.markdown);titles=[docs[0].title,docs[1].title];
       }
       if(this.disposed || stamp!==this.generation)return;
       this.task=startCompare(a,b);
       const result=await this.task.result;
       if(this.disposed || stamp!==this.generation)return;
-      this.result=result;this.activeChange=-1;
+      this.result=result;this.titles=titles;this.activeChange=-1;
       const coarse=this.result.coarse?`　其中 ${this.result.coarse} 个区块改动过大，已按整块标记`:'';
       const hunks=this.result.rows.filter(isChangedRow).length;
       this.status(this.result.changed?`${titles[0]} → ${titles[1]}　共 ${hunks} 处改动 · 新增 ${this.result.added} 字符 · 删除 ${this.result.removed} 字符${coarse}`:'两个版本完全一致（已统一 CRLF / LF 换行）。');

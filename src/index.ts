@@ -25,7 +25,7 @@ export default class DocumentDiffPlugin extends Plugin {
     this.addIcons('<symbol id="iconDocumentDiff" viewBox="0 0 32 32"><path d="M4 3h10v3H7v20h7v3H4V3zm14 0h10v26H18v-3h7V6h-7V3zM9 11h6v3H9v-3zm8 7h6v3h-6v-3zm2-3h3v9h-3v-9z"/></symbol>');
     const plugin=this;
     this.addTab({type:TAB,init(){
-      const panel=new DiffPanel(this.element as HTMLElement,undefined,()=>{plugin.rememberDocument();return plugin.lastDocument;});
+      const panel=new DiffPanel(this.element as HTMLElement,undefined,()=>{plugin.rememberDocument();return plugin.lastDocument;},id=>void openTab({app:plugin.app,doc:{id}}).catch(error=>showMessage(`无法打开文档：${String(error)}`)));
       plugin.panels.set(this.element,panel);
       plugin.pendingAction?.(panel);plugin.pendingAction=undefined;
     },destroy(){plugin.panels.get(this.element)?.destroy();plugin.panels.delete(this.element);}});
